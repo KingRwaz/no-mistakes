@@ -26,7 +26,7 @@ This page is the overview. For each step's exact behavior, defaults, skip rules,
 The pipeline is opinionated so that "passed the gate" has a stable meaning:
 
 - the branch was checked against fresh upstream first
-- review, tests, docs, and lint happened before any upstream push
+- review, tests, user-facing test evidence when available, docs, and lint happened before any upstream push
 - the human stayed in control when a step needed judgment
 - push, PR creation, and CI monitoring only happened after the local gate was satisfied
 
@@ -37,7 +37,7 @@ The pipeline is opinionated so that "passed the gate" has a stable meaning:
 | 1 | **Intent** | Infer author intent from recent local agent transcripts | n/a |
 | 2 | **Rebase** | Fetch upstream, rebase your branch onto it | `3` |
 | 3 | **Review** | AI code review of your diff | `0` (requires approval) |
-| 4 | **Test** | Run your tests, or let the agent detect them | `3` |
+| 4 | **Test** | Run baseline tests and gather evidence for inferred intent | `3` |
 | 5 | **Document** | Check for missing or stale doc updates | `3` |
 | 6 | **Lint** | Run lint/static analysis | `3` |
 | 7 | **Push** | Push the validated branch upstream | n/a |

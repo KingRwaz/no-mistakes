@@ -14,7 +14,7 @@ Each step can produce findings, request approval, or trigger auto-fix. Steps tha
 ## Intent
 
 Infers the author's intent from recent local Claude Code, Codex, OpenCode, or Rovo Dev transcripts.
-This is best-effort context, and when available it is included in rebase fixes, review checks and fixes, test detection and fixes, documentation checks and fixes, lint detection and fixes, CI auto-fixes, and PR drafting.
+This is best-effort context, and when available it is included in rebase fixes, review checks and fixes, test detection, evidence validation, and fixes, documentation checks and fixes, lint detection and fixes, CI auto-fixes, and PR drafting.
 
 **Behavior:**
 - Runs only when `intent.enabled` is true
@@ -63,15 +63,16 @@ AI code review of your diff.
 
 ## Test
 
-Runs your test suite.
+Runs baseline tests and gathers evidence for the intended behavior.
 
 **Behavior:**
-- If `commands.test` is set in repo config: runs it via the platform shell (`sh -c` on POSIX, `cmd.exe /c` on Windows) and captures output. Non-zero exit produces `error` findings.
-- If `commands.test` is empty: the agent detects and runs relevant tests with inferred user intent when available, returning structured findings with severity, description, and `action` (`no-op`, `auto-fix`, `ask-user`).
-- The step also records the exact tests it exercised in a `tested` array and may include a short natural-language `testing_summary`; these are persisted even when tests pass so later steps can reuse them.
+- If `commands.test` is set in repo config: runs it first as a baseline via the platform shell (`sh -c` on POSIX, `cmd.exe /c` on Windows) and captures output. Non-zero exit produces `error` findings.
+- If `commands.test` is empty, or inferred user intent is available after the baseline command passes: the agent validates the change with evidence-oriented tests or manual checks, returning structured findings with severity, description, and `action` (`no-op`, `auto-fix`, `ask-user`).
+- The step records the exact tests and checks it exercised in a `tested` array, may include a short natural-language `testing_summary`, and includes an `artifacts` array for reviewer-visible evidence such as screenshots, videos, logs, CLI transcripts, rendered output, or API responses.
+- Missing evidence for inferred user intent can be reported as a warning with `action: ask-user`.
 - If the agent creates new test files (detected via `git status --porcelain`), approval is required even if tests pass.
 
-**Approval:** failing test findings with `action: ask-user` always require human approval. `action: auto-fix` findings stay eligible for the fix loop. `action: no-op` findings are informational only.
+**Approval:** test findings with `action: ask-user` always require human approval, including missing-evidence warnings for inferred intent. `action: auto-fix` findings stay eligible for the fix loop. `action: no-op` findings are informational only.
 
 **Auto-fix:** the agent receives the previous test findings plus any per-finding user notes, any selected user-authored findings from the TUI, and a sanitized history of prior rounds for that step, including earlier fix summaries and any findings the user left unselected in prior approval cycles, then tests run again. Fix commits use `no-mistakes(test): <summary>`.
 
@@ -140,7 +141,8 @@ Creates or updates a pull request.
 - Uses the provider CLI for GitHub/GitLab and the Bitbucket API for Bitbucket Cloud
 - PR title: agent-generated with inferred user intent when available, in conventional commit format (`type(scope): description` or `type: description`); user-facing product impact should use `feat` or `fix` so release automation can pick it up; when a scope is used, it should be the primary affected real module/package from the changed paths and kept broad rather than file-level
 - PR body includes: a `## Intent` section from extracted user intent when available, an agent-authored `## What Changed`, and regenerated `## Risk Assessment`, `## Testing`, and `## Pipeline` sections from recorded step results and rounds
-- The regenerated `## Testing` section prefers the recorded `testing_summary`, lists deduplicated `tested` commands or selectors, and ends with the overall outcome including run count and total duration when available
+- The regenerated `## Testing` section prefers the recorded `testing_summary`, lists deduplicated `tested` commands or selectors, includes produced evidence artifacts from `path`, `url`, or `content` fields when available, and ends with the overall outcome including run count and total duration when available
+- Evidence artifacts render in the PR body: image artifacts appear inline, video artifacts use an HTML video element, log/file artifacts become links or inline text blocks, and GitHub PRs convert repository-relative paths to blob or raw URLs
 
 Stores the PR URL in the database and streams it to the TUI.
 

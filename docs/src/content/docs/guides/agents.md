@@ -8,18 +8,19 @@ regardless of which agent you prefer. The default `agent: auto` setting picks
 the first supported native agent available on your system.
 
 The agent is responsible for the parts of the gate that benefit from judgment:
-code review, test or lint detection when you have not configured explicit
-commands, auto-fixing, and setup-wizard suggestions when you leave prompts
-blank.
+code review, evidence-oriented test validation, test or lint detection when you
+have not configured explicit commands, auto-fixing, and setup-wizard suggestions
+when you leave prompts blank.
 
 ## How to choose quickly
 
 - Leave `agent: auto` if one good agent is already installed and you do not need repo-specific behavior.
 - Set a repo-level `agent` override when one codebase clearly works better with a different tool.
-- Set explicit `commands.test` and `commands.lint` if you want deterministic command execution regardless of agent choice.
+- Set explicit `commands.test` and `commands.lint` if you want deterministic baseline command execution regardless of agent choice.
 
 That last point matters: the agent helps fill in gaps, but explicit repo
-commands are still the strongest way to make the gate predictable.
+commands are still the strongest way to make the baseline gate predictable.
+When user intent is available, the test step may still invoke the configured agent after `commands.test` succeeds to gather evidence that demonstrates the change.
 
 ## Supported agents
 
@@ -67,7 +68,7 @@ It does not auto-select ACP targets.
 Changing agents most directly affects:
 
 - review quality and tone
-- test and lint detection when commands are not configured
+- test evidence collection, plus test and lint detection when commands are not configured
 - how good auto-fix attempts are for your stack
 - branch name and commit subject suggestions in the setup wizard
 
@@ -138,7 +139,7 @@ Transient API and network failures are retried up to three times with exponentia
 ## Intent extraction
 
 When `intent.enabled` is true, no-mistakes reads recent local transcripts from Claude Code, Codex, OpenCode, and Rovo Dev during the `intent` pipeline step.
-It matches sessions against the changed files, summarizes the likely author intent with the configured pipeline agent, includes that summary as untrusted context in rebase fixes, review checks and fixes, test detection and fixes, lint detection and fixes, documentation checks and fixes, CI auto-fixes, and PR prompts, and renders it in generated PR descriptions.
+It matches sessions against the changed files, summarizes the likely author intent with the configured pipeline agent, includes that summary as untrusted context in rebase fixes, review checks and fixes, test detection, evidence validation, and fixes, lint detection and fixes, documentation checks and fixes, CI auto-fixes, and PR prompts, and renders it in generated PR descriptions.
 
 Transcript readers collect user and assistant text messages but exclude tool call output.
 They read Claude Code transcripts from `~/.claude/projects`, Codex metadata from `~/.codex/state_*.sqlite` plus referenced rollout files, OpenCode messages from `$XDG_DATA_HOME/opencode/opencode.db` or `~/.local/share/opencode/opencode.db`, and Rovo Dev sessions from `~/.rovodev/sessions`.

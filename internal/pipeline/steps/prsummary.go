@@ -3,12 +3,19 @@ package steps
 import (
 	"fmt"
 	"html"
+	"net/url"
+	"path"
 	"strings"
 	"time"
 
 	"github.com/kunchenguid/no-mistakes/internal/db"
 	"github.com/kunchenguid/no-mistakes/internal/types"
 )
+
+type testingSummaryOptions struct {
+	githubBlobBase string
+	githubRawBase  string
+}
 
 // BuildPipelineSummary produces a deterministic markdown section from step results and rounds.
 func BuildPipelineSummary(steps []*db.StepResult, rounds map[string][]*db.StepRound) (string, string) {
@@ -48,6 +55,14 @@ func BuildPipelineSummary(steps []*db.StepResult, rounds map[string][]*db.StepRo
 
 // BuildTestingSummary extracts a deterministic Testing section from the test step.
 func BuildTestingSummary(steps []*db.StepResult, rounds map[string][]*db.StepRound) string {
+	return buildTestingSummary(steps, rounds, testingSummaryOptions{})
+}
+
+func BuildTestingSummaryForPR(steps []*db.StepResult, rounds map[string][]*db.StepRound, upstreamURL, ref string) string {
+	return buildTestingSummary(steps, rounds, testingSummaryOptionsForGitHub(upstreamURL, ref))
+}
+
+func buildTestingSummary(steps []*db.StepResult, rounds map[string][]*db.StepRound, opts testingSummaryOptions) string {
 	for _, sr := range steps {
 		if sr.StepName != types.StepTest {
 			continue
@@ -61,7 +76,8 @@ func BuildTestingSummary(steps []*db.StepResult, rounds map[string][]*db.StepRou
 
 		testingSummary := collectTestingSummary(sr, stepRounds)
 		tested := collectTestingDetails(sr, stepRounds)
-		if testingSummary == "" && len(tested) == 0 {
+		artifacts := collectTestingArtifacts(sr, stepRounds)
+		if testingSummary == "" && len(tested) == 0 && len(artifacts) == 0 {
 			return "## Testing\n\n- " + line
 		}
 
@@ -84,6 +100,16 @@ func BuildTestingSummary(steps []*db.StepResult, rounds map[string][]*db.StepRou
 			b.WriteString(rendered)
 			b.WriteString("\n")
 		}
+		for _, artifact := range artifacts {
+			rendered := renderTestingArtifact(artifact, opts)
+			if rendered == "" {
+				continue
+			}
+			b.WriteString(rendered)
+			if !strings.HasSuffix(rendered, "\n") {
+				b.WriteString("\n")
+			}
+		}
 		if outcome := buildTestingOutcomeLine(line, stepRounds); outcome != "" {
 			b.WriteString("- ")
 			b.WriteString(outcome)
@@ -94,6 +120,46 @@ func BuildTestingSummary(steps []*db.StepResult, rounds map[string][]*db.StepRou
 	}
 
 	return ""
+}
+
+func testingSummaryOptionsForGitHub(upstreamURL, ref string) testingSummaryOptions {
+	repoPath := githubRepoPath(upstreamURL)
+	ref = strings.TrimSpace(ref)
+	if repoPath == "" || ref == "" || strings.ContainsAny(ref, "\n\r <>[]()\\") {
+		return testingSummaryOptions{}
+	}
+	return testingSummaryOptions{
+		githubBlobBase: "https://github.com/" + repoPath + "/blob/" + url.PathEscape(ref) + "/",
+		githubRawBase:  "https://raw.githubusercontent.com/" + repoPath + "/" + url.PathEscape(ref) + "/",
+	}
+}
+
+func githubRepoPath(remote string) string {
+	remote = strings.TrimSpace(remote)
+	if remote == "" {
+		return ""
+	}
+	if strings.HasPrefix(remote, "git@github.com:") {
+		repo := strings.TrimPrefix(remote, "git@github.com:")
+		return cleanGitHubRepoPath(repo)
+	}
+	parsed, err := url.Parse(remote)
+	if err != nil || !strings.EqualFold(parsed.Host, "github.com") {
+		return ""
+	}
+	return cleanGitHubRepoPath(strings.TrimPrefix(parsed.Path, "/"))
+}
+
+func cleanGitHubRepoPath(repo string) string {
+	repo = strings.TrimSuffix(strings.TrimSpace(repo), ".git")
+	parts := strings.Split(repo, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	if strings.ContainsAny(repo, "\n\r <>[]()\\") || strings.Contains(repo, "..") {
+		return ""
+	}
+	return url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1])
 }
 
 func collectTestingSummary(sr *db.StepResult, rounds []*db.StepRound) string {
@@ -121,11 +187,70 @@ func testingSummaryFromFindings(raw *string) string {
 
 func collectTestingDetails(sr *db.StepResult, rounds []*db.StepRound) []string {
 	seen := map[string]bool{}
-	details := appendTestingDetails(nil, seen, sr.FindingsJSON)
-	for _, r := range rounds {
-		details = appendTestingDetails(details, seen, r.FindingsJSON)
+	var details []string
+	for _, raw := range testingEvidenceFindingsJSON(sr, rounds) {
+		details = appendTestingDetails(details, seen, raw)
 	}
 	return details
+}
+
+func collectTestingArtifacts(sr *db.StepResult, rounds []*db.StepRound) []types.TestArtifact {
+	seen := map[string]bool{}
+	var artifacts []types.TestArtifact
+	for _, raw := range testingEvidenceFindingsJSON(sr, rounds) {
+		artifacts = appendTestingArtifacts(artifacts, seen, raw)
+	}
+	return artifacts
+}
+
+func testingEvidenceFindingsJSON(sr *db.StepResult, rounds []*db.StepRound) []*string {
+	if hasTestingEvidenceMetadata(sr.FindingsJSON) {
+		return []*string{sr.FindingsJSON}
+	}
+	for i := len(rounds) - 1; i >= 0; i-- {
+		if hasTestingEvidenceMetadata(rounds[i].FindingsJSON) {
+			return []*string{rounds[i].FindingsJSON}
+		}
+	}
+	return nil
+}
+
+func hasTestingEvidenceMetadata(raw *string) bool {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return false
+	}
+	findings, err := types.ParseFindingsJSON(*raw)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(findings.TestingSummary) != "" || len(findings.Tested) > 0 || len(findings.Artifacts) > 0
+}
+
+func appendTestingArtifacts(artifacts []types.TestArtifact, seen map[string]bool, raw *string) []types.TestArtifact {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return artifacts
+	}
+	findings, err := types.ParseFindingsJSON(*raw)
+	if err != nil {
+		return artifacts
+	}
+	for _, artifact := range findings.Artifacts {
+		artifact.Label = sanitizePromptText(artifact.Label)
+		artifact.Kind = strings.ToLower(sanitizePromptText(artifact.Kind))
+		artifact.Path = sanitizeArtifactPath(artifact.Path)
+		artifact.URL = sanitizeArtifactURL(artifact.URL)
+		artifact.Content = sanitizePromptMultilineText(artifact.Content)
+		key := artifact.Kind + "\x00" + artifact.Label + "\x00" + artifact.Path + "\x00" + artifact.URL + "\x00" + artifact.Content
+		if artifact.Label == "" || seen[key] {
+			continue
+		}
+		if artifact.Path == "" && artifact.URL == "" && artifact.Content == "" {
+			continue
+		}
+		seen[key] = true
+		artifacts = append(artifacts, artifact)
+	}
+	return artifacts
 }
 
 func appendTestingDetails(details []string, seen map[string]bool, raw *string) []string {
@@ -172,6 +297,116 @@ func renderTestingSummary(summary string) string {
 		return renderTestedDetail(clean)
 	}
 	return clean
+}
+
+func renderTestingArtifact(artifact types.TestArtifact, opts testingSummaryOptions) string {
+	label := sanitizePromptText(artifact.Label)
+	if label == "" {
+		return ""
+	}
+	target := artifact.URL
+	if target == "" {
+		target = artifactTargetForPath(artifact, opts)
+	}
+
+	var b strings.Builder
+	if target != "" {
+		if isImageArtifact(artifact.Kind, target) {
+			b.WriteString(fmt.Sprintf("**%s**\n\n![%s](%s)\n", html.EscapeString(label), markdownAltText(label), target))
+		} else if isVideoArtifact(artifact.Kind, target) {
+			b.WriteString(fmt.Sprintf("**%s**\n\n<video src=\"%s\" controls></video>\n", html.EscapeString(label), html.EscapeString(target)))
+		} else {
+			b.WriteString(fmt.Sprintf("- Evidence: [%s](%s)\n", html.EscapeString(label), target))
+		}
+	}
+	if artifact.Content != "" {
+		if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n\n") {
+			b.WriteString("\n")
+		}
+		b.WriteString(fmt.Sprintf("**%s**\n\n```text\n%s\n```\n", html.EscapeString(label), escapeMarkdownFence(artifact.Content)))
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+func artifactTargetForPath(artifact types.TestArtifact, opts testingSummaryOptions) string {
+	if artifact.Path == "" {
+		return ""
+	}
+	if opts.githubBlobBase == "" || opts.githubRawBase == "" {
+		return artifact.Path
+	}
+	if isImageArtifact(artifact.Kind, artifact.Path) || isVideoArtifact(artifact.Kind, artifact.Path) {
+		return opts.githubRawBase + artifact.Path
+	}
+	return opts.githubBlobBase + artifact.Path
+}
+
+func sanitizeArtifactPath(target string) string {
+	clean := strings.TrimSpace(target)
+	if clean == "" || clean != sanitizePromptText(target) || strings.ContainsAny(clean, "\n\r<>[]()\\") {
+		return ""
+	}
+	if strings.HasPrefix(clean, "/") || strings.HasPrefix(clean, "~") || strings.Contains(clean, ":") {
+		return ""
+	}
+	cleanedPath := path.Clean(clean)
+	if cleanedPath == "." || cleanedPath != clean || cleanedPath == ".." || strings.HasPrefix(cleanedPath, "../") {
+		return ""
+	}
+	return clean
+}
+
+func sanitizeArtifactURL(target string) string {
+	clean := strings.TrimSpace(target)
+	if clean == "" || clean != sanitizePromptText(target) || strings.ContainsAny(clean, "\n\r <>[]()\"'") {
+		return ""
+	}
+	parsed, err := url.ParseRequestURI(clean)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+		return clean
+	default:
+		return ""
+	}
+}
+
+func markdownAltText(label string) string {
+	label = strings.ReplaceAll(label, "[", "(")
+	label = strings.ReplaceAll(label, "]", ")")
+	return label
+}
+
+func isImageArtifact(kind, target string) bool {
+	if kind == "screenshot" || kind == "gif" || kind == "image" {
+		return true
+	}
+	lower := strings.ToLower(target)
+	for _, suffix := range []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"} {
+		if strings.HasSuffix(lower, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func isVideoArtifact(kind, target string) bool {
+	if kind == "video" || kind == "recording" {
+		return true
+	}
+	lower := strings.ToLower(target)
+	for _, suffix := range []string{".mp4", ".webm", ".mov"} {
+		if strings.HasSuffix(lower, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func escapeMarkdownFence(content string) string {
+	return strings.ReplaceAll(content, "```", "`` `")
 }
 
 func buildTestingOutcomeLine(summaryLine string, rounds []*db.StepRound) string {
