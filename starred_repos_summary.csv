@@ -1,0 +1,11 @@
+id,name,full_name,owner,owner_type,stars,forks,open_issues,language,description
+1197515131,awesome-design-md,VoltAgent/awesome-design-md,VoltAgent,Organization,94246,11171,294,,A collection of DESIGN.md files analysis by popular brand design systems
+1283689597,AtomisticSkills,KingRwaz/AtomisticSkills,KingRwaz,User,1,0,0,,Intergrating Atomistic Skills into Agentic IDEs
+1130548049,AtomisticSkills,learningmatter-mit/AtomisticSkills,learningmatter-mit,Organization,123,13,0,Python,Intergrating Atomistic Skills into Agentic IDEs
+20884782,Cura,Ultimaker/Cura,Ultimaker,Organization,6986,2172,3674,Python,3D printer / slicing GUI built on top of the Uranium framework
+257485422,vite,vitejs/vite,vitejs,Organization,81691,8360,754,TypeScript,Next generation frontend tooling. It's fast!
+15111821,grafana,grafana/grafana,grafana,Organization,75179,14153,3520,TypeScript,The open and composable observability and data visualization platform
+31792824,flutter,flutter/flutter,flutter,Organization,177634,30578,12923,Dart,Flutter makes it easy and fast to build beautiful apps for mobile and beyond
+531976789,TrollStore,opa334/TrollStore,opa334,User,21620,1594,48,Objective-C,Jailed iOS app that can install IPAs permanently
+1158799392,astrid,unicity-astrid/astrid,unicity-astrid,Organization,10321,128,238,Rust,An operating system for AI agents
+1207222725,design.md,google-labs-code/design.md,google-labs-code,Organization,23101,1831,55,TypeScript,A format specification for describing a visual identity to coding agents
